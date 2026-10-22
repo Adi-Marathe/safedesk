@@ -108,6 +108,7 @@ class OllamaBackend:
             ],
             format=Analysis.model_json_schema(),
             options={"temperature": 0, "num_ctx": self.num_ctx},
+            keep_alive="30m",
         )
 
         raw_text = response.message.content
