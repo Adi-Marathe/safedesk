@@ -32,6 +32,8 @@ def init_session():
         st.session_state.verified_deadlines = None
     if "verified_amounts" not in st.session_state:
         st.session_state.verified_amounts = None
+    if "backend_status" not in st.session_state:
+        st.session_state.backend_status = None
 
 
 def wipe_session():
@@ -45,57 +47,97 @@ def wipe_session():
     st.session_state.verified_amounts = None
 
 
-def main():
-    """Main Streamlit app."""
-    st.set_page_config(page_title="SafeDesk", page_icon="📄", layout="wide")
-
-    init_session()
-
-    # Sidebar
-    with st.sidebar:
-        st.title("SafeDesk")
-        st.markdown("### 🔒 Privacy First")
-        st.success("✅ Running locally on Gemma 4 E4B\n\nNothing leaves this device.")
-
-        st.markdown("---")
-        st.markdown("**Model:** gemma4:e4b")
-
-        # Check backend health
-        try:
-            backend = OllamaBackend()
-            backend.check_health()
-            st.info("✅ Ollama connected")
-        except BackendError as e:
-            st.error(f"❌ Backend Error:\n\n{e}")
-            st.stop()
-
-        # Cross-check status
+def render_status_bar():
+    """Render horizontal status bar at bottom."""
+    st.markdown("---")
+    
+    # Create horizontal layout for status items
+    cols = st.columns([2, 2, 2, 2, 1])
+    
+    with cols[0]:
+        st.markdown("##### 🔒 Privacy")
+        st.caption("Running locally • Gemma 4 E4B")
+        st.caption("Nothing leaves this device")
+    
+    with cols[1]:
+        st.markdown("##### 🔌 Backend Status")
+        if st.session_state.backend_status == "connected":
+            st.success("✅ Ollama connected")
+        elif st.session_state.backend_status == "error":
+            st.error("❌ Ollama disconnected")
+        else:
+            st.info("⏳ Checking...")
+    
+    with cols[2]:
+        st.markdown("##### 🔍 Cross-check")
         if st.session_state.reference_text:
             ref = st.session_state.reference_text
             if ref.source == "pdf_text":
-                st.info("📄 Cross-check: PDF text")
+                st.info("📄 PDF text layer")
             elif ref.source == "tesseract":
-                st.info("🔍 Cross-check: Tesseract")
+                st.info("🔍 Tesseract OCR")
             else:
-                st.info("⚠️ Cross-check: Off")
+                st.warning("⚠️ Off")
         else:
-            st.info("⚠️ Cross-check: Off")
-
-        st.markdown("---")
-        if st.button("🗑️ Wipe session", use_container_width=True):
+            st.caption("Not available")
+    
+    with cols[3]:
+        st.markdown("##### 📊 Session")
+        if st.session_state.analysis:
+            st.success("✅ Document analyzed")
+        else:
+            st.caption("No document loaded")
+    
+    with cols[4]:
+        st.markdown("##### ")
+        if st.button("🗑️ Clear", use_container_width=True, help="Wipe session data"):
             wipe_session()
             st.rerun()
 
-    # Main content
-    st.title("📄 SafeDesk: Private Document Parser")
-    st.markdown("Upload a PDF or photo of a letter, bill, or notice. Gemma 4 reads it locally—nothing leaves your machine.")
 
-    # File uploader
-    uploaded_file = st.file_uploader(
-        "Choose a file",
-        type=["pdf", "png", "jpg", "jpeg", "webp"],
-        help="Upload a PDF or image (PNG, JPG, WEBP)"
+def main():
+    """Main Streamlit app."""
+    st.set_page_config(
+        page_title="SafeDesk - Private Document Parser", 
+        page_icon="📄", 
+        layout="wide",
+        initial_sidebar_state="collapsed"
     )
+
+    init_session()
+
+    # Check backend health once
+    if st.session_state.backend_status is None:
+        try:
+            backend = OllamaBackend()
+            backend.check_health()
+            st.session_state.backend_status = "connected"
+        except BackendError as e:
+            st.session_state.backend_status = "error"
+            st.error(f"❌ **Backend Error**\n\n{e}")
+            st.markdown("---")
+            render_status_bar()
+            st.stop()
+    
+    backend = OllamaBackend()
+
+    # Header
+    st.markdown("<h1 style='text-align: center;'>📄 SafeDesk</h1>", unsafe_allow_html=True)
+    st.markdown("<h4 style='text-align: center; color: #666;'>Private Document Parser • Powered by Gemma 4 E4B</h4>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center;'>Upload a PDF or photo of a letter, bill, or notice. Read locally—nothing leaves your machine.</p>", unsafe_allow_html=True)
+    
+    st.markdown("---")
+
+    
+    # File uploader - centered and prominent
+    col1, col2, col3 = st.columns([1, 3, 1])
+    with col2:
+        uploaded_file = st.file_uploader(
+            "Drop your document here or click to browse",
+            type=["pdf", "png", "jpg", "jpeg", "webp"],
+            help="Supports: PDF, PNG, JPG, JPEG, WEBP",
+            label_visibility="collapsed"
+        )
 
     if uploaded_file is not None:
         # Get file extension
@@ -157,41 +199,62 @@ def main():
         reference = st.session_state.reference_text
 
         st.markdown("---")
+        st.markdown("## 📋 Analysis Results")
 
-        # Two columns: images and results
-        col1, col2 = st.columns([1, 2])
+        # Three columns for better layout
+        left_col, middle_col, right_col = st.columns([2, 3, 2])
 
-        with col1:
-            st.subheader("📄 Pages")
+        with left_col:
+            st.markdown("### 📄 Document Pages")
             for i, img_bytes in enumerate(st.session_state.page_images):
                 img = Image.open(io.BytesIO(img_bytes))
                 st.image(img, caption=f"Page {i + 1}", use_container_width=True)
 
-        with col2:
-            st.subheader("📋 Analysis")
-
-            # Category chip
+        with middle_col:
+            # Category and Issuer
             category_display = analysis.category.replace("_", " ").title()
-            st.markdown(f"**Category:** `{category_display}`")
-
-            # Issuer
+            st.markdown(f"### 📂 {category_display}")
+            
             if analysis.issuer:
-                st.markdown(f"**Issuer:** {analysis.issuer}")
+                st.markdown(f"**From:** {analysis.issuer}")
 
-            # Summary bullets
-            st.markdown("**Summary:**")
+            # Summary
+            st.markdown("#### 📝 Summary")
             for bullet in analysis.summary_bullets:
-                st.markdown(f"- {bullet}")
+                st.markdown(f"• {bullet}")
 
-            st.markdown("---")
+            # Action required
+            if analysis.action_required:
+                st.markdown("#### ⚡ Action Required")
+                st.info(analysis.action_required)
 
+            # Cross-check stats
+            if reference and reference.source:
+                total_facts = len(verified_deadlines) + len(verified_amounts)
+                confirmed = sum(
+                    1
+                    for vd in (verified_deadlines + verified_amounts)
+                    if vd.status == "confirmed"
+                )
+                unchecked = sum(
+                    1
+                    for vd in (verified_deadlines + verified_amounts)
+                    if vd.status == "unchecked"
+                )
+
+                st.caption(
+                    f"📊 **Verification:** {confirmed} of {total_facts} facts cross-checked"
+                    + (f", {unchecked} read by Gemma only" if unchecked > 0 else "")
+                )
+
+        with right_col:
             # Deadlines
             if verified_deadlines:
-                st.subheader("⏰ Deadlines")
+                st.markdown("### ⏰ Deadlines")
 
-                # Sort by date (put undated at the end)
+                # Sort by date
                 def sort_key(vd):
-                    if vd.value:  # date_iso
+                    if vd.value:
                         return (0, vd.value)
                     return (1, "")
 
@@ -210,89 +273,67 @@ def main():
                     color_icon = color_map.get(urgency.color, "⚪")
 
                     # Status badge
-                    status_badge = ""
                     if vd.status == "confirmed":
                         status_badge = "✅"
                     elif vd.status == "mismatch":
-                        status_badge = "❌ MISMATCH"
+                        status_badge = "❌"
                     else:
-                        status_badge = "⚠️ Gemma only"
+                        status_badge = "⚠️"
 
-                    # Skip mismatches in urgent banner
                     with st.container():
-                        st.markdown(f"### {color_icon} {vd.label}")
-                        st.markdown(f"**{urgency.label}** {status_badge}")
-                        st.caption(f'"{vd.evidence_quote}"')
-
+                        st.markdown(f"**{color_icon} {vd.label}**")
+                        st.caption(f"{urgency.label} {status_badge}")
+                        st.caption(f'_"{vd.evidence_quote}"_')
+                        
                         if vd.status == "mismatch":
-                            st.error("⚠️ Does not match the document text. Check manually.")
-
-            st.markdown("---")
+                            st.error("⚠️ Check manually", icon="⚠️")
+                        
+                        st.markdown("")
 
             # Amounts
             if verified_amounts:
-                st.subheader("💰 Amounts")
+                st.markdown("### 💰 Amounts")
 
                 for va in verified_amounts:
-                    status_badge = ""
                     if va.status == "confirmed":
                         status_badge = "✅"
                     elif va.status == "mismatch":
-                        status_badge = "❌ MISMATCH"
+                        status_badge = "❌"
                     else:
-                        status_badge = "⚠️ Gemma only"
+                        status_badge = "⚠️"
 
                     with st.container():
                         st.markdown(f"**{va.label}:** {va.value} {status_badge}")
-                        st.caption(f'"{va.evidence_quote}"')
-
+                        st.caption(f'_"{va.evidence_quote}"_')
+                        
                         if va.status == "mismatch":
-                            st.error("⚠️ Does not match the document text. Check manually.")
+                            st.error("⚠️ Check manually", icon="⚠️")
+                        
+                        st.markdown("")
 
-            st.markdown("---")
-
-            # Marks (stamps, handwriting)
+            # Marks
             if analysis.marks:
-                st.subheader("✍️ Marks & Stamps")
+                st.markdown("### ✍️ Marks & Stamps")
                 for mark in analysis.marks:
-                    kind_icon = {"stamp": "📮", "handwriting": "✍️", "signature": "✒️", "other": "🔖"}
+                    kind_icon = {
+                        "stamp": "📮",
+                        "handwriting": "✍️",
+                        "signature": "✒️",
+                        "other": "🔖"
+                    }
                     icon = kind_icon.get(mark.kind, "🔖")
-                    st.markdown(f"{icon} **{mark.kind.title()}:** {mark.text}")
-                    st.caption("Visual mark, read by Gemma only")
+                    st.markdown(f"{icon} **{mark.text}**")
+                    st.caption(f"_{mark.kind.title()}_")
 
-            st.markdown("---")
+        # Expander for reference text
+        if reference and reference.source and reference.text:
+            with st.expander("📄 View cross-check text"):
+                st.text(reference.text[:2000])
+                if len(reference.text) > 2000:
+                    st.caption(f"... ({len(reference.text)} characters total)")
 
-            # Action required
-            if analysis.action_required:
-                st.subheader("⚡ Action Required")
-                st.info(analysis.action_required)
-
-            # Cross-check stats
-            if reference and reference.source:
-                total_facts = len(verified_deadlines) + len(verified_amounts)
-                confirmed = sum(
-                    1
-                    for vd in (verified_deadlines + verified_amounts)
-                    if vd.status == "confirmed"
-                )
-                unchecked = sum(
-                    1
-                    for vd in (verified_deadlines + verified_amounts)
-                    if vd.status == "unchecked"
-                )
-
-                st.markdown("---")
-                st.caption(
-                    f"📊 **Verification:** {confirmed} of {total_facts} facts cross-checked"
-                    + (f", {unchecked} read by Gemma only" if unchecked > 0 else "")
-                )
-
-            # Expander for reference text
-            if reference and reference.source and reference.text:
-                with st.expander("📄 Show cross-check text"):
-                    st.text(reference.text[:2000])  # Limit display
-                    if len(reference.text) > 2000:
-                        st.caption(f"... ({len(reference.text)} characters total)")
+    # Status bar at bottom
+    render_status_bar()
 
 
 if __name__ == "__main__":
